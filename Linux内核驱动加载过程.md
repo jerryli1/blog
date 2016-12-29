@@ -78,10 +78,10 @@ MODULE_SIG_STRING相当于签名数据的magic，值为字符串"~Module signatu
 
 在加载模块的过程中，要遍历每个Elf_Sym结构体，根据st_name查找的的符号地址复制给st_value，参见simplify_symbols函数。
 
-## 地址重定位
+## 0x05 地址重定位
 代码段和数据段中引用到的符号地址需要在加载时重定位，区块类型是SHT_REL或者SHT_RELA的都是重定位数据块。每个重定位区块负责对一个区块进行重定位，重定位块的Elf_Shdr.sh_info标识它是属于哪一个区块的重定位信息。Elf32_Rel.r_offset表示区块内的偏移量。Elf32_Rel.r_info的高24位表示对应的符号在符号表中的偏移，这样就可以找到向前已经加载好的符号的真实地址了。参见apply_relocations函数。
 
-## 其他细节
+## 0x06 其他细节
 
 - 如果加载模块的过程中，该模块已经被加载或者正在加载中，那么直接退出。参见add_unformed_module函数。
 
