@@ -1,5 +1,7 @@
 # Andriod Linker原理
 
+> 2017-02-09, beijing, @elemeta
+
 linker是个动态链接器，也叫解析器，用来对执行的elf可执行前的so文件加载和重定位。
 `PT_INTERP`中指定了解析器的路径。
 

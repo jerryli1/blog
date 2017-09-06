@@ -2,7 +2,7 @@
 
 # FltSetSecurityObject引起的Win2003Sp2死锁分析
 
-> 2015-09-24, 北京
+> 2015-09-24, beijing, @elemeta
 > 原创作者：shadow3、elemeta
 
 ## 0x00 前言
