@@ -103,7 +103,7 @@ FltSetSecurityObject函数是FltMgr中的一个函数，它用来设置对象的
 
 我们先梳理下上文提到的几个函数的调用关系：
 
-![函数关系图](./images/20150924-FltSetSecurityObject-calltree.png)
+![函数关系图](_images/20150924-FltSetSecurityObject-calltree.png)
 
 上面还有一个关键代码没有分析，就是查找`MJ_IRP_SET_SECURITY`的处理函数的部分，FltpGetCallbackNodeForInstance和FltpGetNextCallbackNodeForInstance函数，下面看看这两个函数的代码。
 
