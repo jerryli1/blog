@@ -1,3 +1,9 @@
+## KVM
+
+KVM在内核中实现了虚拟的CPU、内存管理、中断控制器、时钟设备，这不仅高性能，还大大简化了应用层VMM的开发难度。Firecracker使用开源库[kvm-ioctls](https://github.com/rust-vmm/kvm-ioctls)来操作KVM。
+
+> 避免重复造轮子，CrosVM和Firecracker作者提取通用的部分成立新项目[rust-vmm](https://github.com/rust-vmm)，两个项目都引用它。
+
 在深入Firecarcker内部之前，先来编写一个最简单的虚拟机，它只有CPU和内存。大致步骤如下：
 
 1. 创建KVM实例

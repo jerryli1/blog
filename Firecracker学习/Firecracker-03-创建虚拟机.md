@@ -1,28 +1,15 @@
-本文以x86_64为例看看Firecracker创建虚拟机的细节。
+本文以x86_64为例创建虚拟机大致以下阶段：
 
-## 架构
+1. 创建并布局内存和CPU寄存器(准备好Linux执行环境)
+2. 创建vCPU和设备(中断控制器、传统设备、Virtio设备)
+3. 启动虚拟机，子线程运行每个vCPU
+4. 进入Linux
 
-先看官网文档：https://github.com/firecracker-microvm/firecracker/blob/master/docs/design.md
+## 总览
 
-![image-20210402154648948](_images/firecracker-arch.png)
+src/vmm/src/builder.rs文件里的`build_microvm_for_boot()`函数是总入口。
 
-## KVM
-
-KVM在内核中实现了虚拟的CPU、内存管理、中断控制器、时钟设备，这不仅高性能，还大大简化了应用层VMM的开发难度。Firecracker使用开源库[kvm-ioctls](https://github.com/rust-vmm/kvm-ioctls)来操作KVM。
-
-> 避免重复造轮子，CrosVM和Firecracker作者提取通用的部分成立新项目[rust-vmm](https://github.com/rust-vmm)，两个项目都引用它。
-
-## 流程
-
-以x86_64为例，src/vmm/src/builder.rs文件里的`build_microvm_for_boot()`函数是总入口。创建虚拟机流程大致如下：
-
-1. 创建内存
-2. 创建vCPU和虚拟中断控制器
-3. 创建传统设备(Port I/0)
-4. 创建Virtio设备(MMIO)
-5. 启动虚拟机，分子线程运行每个vCPU。
-
-```yaml
+```python
 build_microvm_for_boot
 	->create_guest_memory     # 创建Guest内存条
 		-> arch::arch_memory_regions()    # 创建x86_64内存条数组
@@ -73,7 +60,9 @@ build_microvm_for_boot
 	->vmm.resume_vm()         # 激活vCPU,进入[Resume]状态，进入Vcpu::running()
 	->event_manager.add_subscriber(vmm) # 主线程订阅VMM的eventfd事件
 ```
-## 创建内存
+## 布局内存
+
+### 创建内存条
 
 KVM可以插入多条内存条，每个插槽(Slot)指定一个物理地址和大小。内存区域的定义如下：
 
@@ -98,47 +87,95 @@ struct kvm_userspace_memory_region {
 [0xd0000000, 0xffffffff] 
 ```
 
+开机之前需要把GDT、IDT、临时页表、临时Stack、vmlinux、cmdline、MP Table、统统再内存里给分配好，然后开机直接使用。
 
-
-## 如何启动Linux
+### 布局Linux镜像
 
 Firecracker没有BIOS或UEFI，它只支持ELF格式的vmlinux。它的方法是在开机之前直接把vmlinux给塞到内存并设置入口函数为CPU执行的第一行代码。
 
-### load_kernel
+- `load_kernel()`函数读取vmlinux的Program Headers并把所有LOAD段加载到Guest内存（PhysAddr和GPA一一对应加载）;
+- `ehdr.e_entry`作为CPU执行的第一行代码。
 
-以下是ELF格式的Program Headers：
+### 设置临时GDT
 
-```sh
-➜  hello readelf -lW hello-vmlinux.bin
+GDT放在0x500位置，内容如下：
 
-Entry point 0x1000000
-There are 5 program headers, starting at offset 64
-
-Program Headers:
-Type  Offset    VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align
-LOAD  0x200000  0xffffffff81000000 0x0000000001000000 0xb6e000 0xb6e000 R E 0x200000
-LOAD  0xe00000  0xffffffff81c00000 0x0000000001c00000 0x0aa000 0x0aa000 RW  0x200000
-LOAD  0x1000000 0x0000000000000000 0x0000000001caa000 0x01f6d8 0x01f6d8 RW  0x200000
-LOAD  0x10ca000 0xffffffff81cca000 0x0000000001cca000 0x125000 0x40c000 RWE 0x200000
-NOTE  0xa031d4  0xffffffff818031d4 0x00000000018031d4 0x000024 0x000024     0x4
 ```
-
-把所有LOAD段加载到Guest内存（PhysAddr和GPA一一对应加载）， `ehdr.e_entry`作为CPU执行的第一行代码。
-
-### 初始化保护模式
-
-在开机之前，还要设置好保护模式（GDT、IDT、页表），方法是硬编码内存布局和寄存器初始值。代码见`kvm_vcpu.configure`函数。
-
-- **CPU上下文**
-
-```sh
-# GDT
 #                   flags   base  limit
 gdt_table[0]  NULL  0       0     0
 gdt_table[1]  CODE  0xa09b  0     0xfffff
 gdt_table[2]  DATA  0xc093  0     0xfffff
 gdt_table[3]  TSS   0x808b  0     0xfffff
+```
 
+### 设置临时页表
+
+临时页表放在0x9000位置，Firecracker制作了支持512MB内存的页表，页大小是2MB，
+
+```
+             CR3 = 0x9000
+一级：PML4    PML4[0] = 0xa000
+二级：PDP     PDP[0]  = 0xb000
+三级：PDE     PDE[0]
+```
+
+### 设置boot_params
+
+根据Linux的要求boot_params放在0x7000位置，其中最主要的内容是e820：
+
+```
+# e820包含再boot_params中
+BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff] usable
+# <-- 跳过了MP Table的地址范围
+BIOS-e820: [mem 0x0000000000100000-0x00000000cfffffff] usable、
+# <-- 跳过了MMIO地址范围
+BIOS-e820: [mem 0x0000000100000000-剩余的大小         ] usable
+```
+
+### 设置MP Table
+
+用来告诉Linux多vCPU拓扑、LAPIC、IOAPIC信息，函数：`setup_mptable`。遵循Intel的MP Spec 1.4协议填充即可，把内容放到GPA=0x9fc00位置后linux会自己去调用，内存布局如下：
+
+```
+ +--------------------------+
+ | mpf_intel                |
+ +--------------------------+ 
+ | mpc_table                |
+ +--------------------------+
+ | mpc_cpu * NCPU           | <- 设置LAPIC ID, 把cpu0设为启动CPU
+ +--------------------------+
+ | mpc_bus                  |
+ +--------------------------+
+ | mpc_ioapic               |
+ +--------------------------+
+ | mpc_intsrc * (IRQ_MAX+1) |
+ +--------------------------+
+ | mpc_lintsrc * 2          |
+ +--------------------------+
+```
+
+### 最终内存布局
+
+```
+             +------------------+
+0            |                  |
+0x500        | GDT[4]           |
+0x520        | IDT[...]         |
+0x7000       | boot_params      |
+0x9000       | PML4 Table       |
+0xa000       | PDP Table        |
+0xb000       | PDE Table        |
+0x20000      | cmdline          |
+0x9fc00      | MP Table         |
+0x1000000    | vmlinux          |
+```
+
+
+## 初始化x64保护模式
+
+在开机之前还要设置保护模式、分页、long-mode、通用寄存器。代码见`kvm_vcpu.configure`函数，CPU上下文如下：
+
+```sh
 # 通用寄存器
 rflags = 2
 rip = vmlinux::ehdr.e_entry
@@ -156,69 +193,11 @@ sregs.tr = tss_seg;
 sregs.cr0 = X86_CR0_PE | X86_CR0_PG
 sregs.cr3 = 0x9000
 sregs.cr4 |= X86_CR4_PAE
-sregs.efer |= EFER_LME | EFER_LMA; # 虚拟机的LMA必须自己设置
+sregs.efer |= EFER_LME | EFER_LMA;
 ```
 
-- **临时页表**
+> 注意：EFER_LMA物理机是由CPU来设置，虚拟机必须手动设置，并且和分页一起设置。
 
-    Firecracker临时制作了个支持512MB内存的页表，页大小是2MB，
+## 参考
 
-    ```
-                 CR3 = 0x9000
-    一级：PML4    PML4[0] = 0xa000
-    二级：PDP     PDP[0]  = 0xb000
-    三级：PDE     PDE[0]
-    ```
-
-    
-
-- **内存布局**
-
-```
-             +------------------+
-0            |                  |
-0x500        | GDT[4]           |
-0x520        | IDT[...]         |
-0x7000       | boot_params      |
-0x9000       | PML4 Table       |
-0xa000       | PDP Table        |
-0xb000       | PDE Table        |
-0x20000      | cmdline          |
-0x9fc00      | MP Table         |
-0x1000000    | vmlinux          |
-```
-
-- **e820**
-
-```sh
-# e820包含再boot_params中
-BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff] usable
-# <-- 跳过了MP Table的地址范围
-BIOS-e820: [mem 0x0000000000100000-0x00000000cfffffff] usable、
-# <-- 跳过了MMIO地址范围
-BIOS-e820: [mem 0x0000000100000000-剩余的大小         ] usable
-```
-
-- **MP table**
-
-函数：`setup_mptable`
-
-遵循Intel的MP Spec 1.4协议填充即可，把内容放到GPA=0x9fc00位置后linux会自己去调用，内存布局如下：
-
-```
-+--------------------------+
-| mpf_intel                |
-+--------------------------+ 
-| mpc_table                |
-+--------------------------+
-| mpc_cpu * NCPU           | <- 设置LAPIC ID, 把cpu0设为启动CPU
-+--------------------------+
-| mpc_bus                  |
-+--------------------------+
-| mpc_ioapic               |
-+--------------------------+
-| mpc_intsrc * (IRQ_MAX+1) |
-+--------------------------+
-| mpc_lintsrc * 2          |
-+--------------------------+
-```
+https://github.com/rust-vmm/vm-memory/blob/HEAD/DESIGN.md

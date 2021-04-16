@@ -4,6 +4,12 @@ Firecracker（[官网](https://firecracker-microvm.github.io/)，[Github](https:
 
 它没有BIOS或UEFI，也没有PCI总线，只有最基本的Port I/0设备(键盘、窗口、RTC)和基于MMIO的Virtio设备，也不支持设备的热拔插。
 
+## 架构
+
+先看官网文档：https://github.com/firecracker-microvm/firecracker/blob/master/docs/design.md
+
+![image-20210402154648948](_images/firecracker-arch.png)
+
 ## 如何使用
 
 先看这里：https://github.com/firecracker-microvm/firecracker/blob/master/docs/rootfs-and-kernel-setup.md
@@ -97,4 +103,5 @@ PID USER PR NI   VIRT   RES  SHR S %CPU %MEM   TIME+ COMMAND
 - [Making OSv Run on Firecracker - OSv Blog](http://blog.osv.io/blog/2019/04/19/making-OSv-run-on-firecraker/)
 - [Firecracker – Lightweight Virtualization for Serverless Computing | AWS News Blog (amazon.com)](https://aws.amazon.com/cn/blogs/aws/firecracker-lightweight-virtualization-for-serverless-computing/)
 - https://github.com/firecracker-microvm/firecracker/tree/master/docs
+- https://rootw.github.io/2019/08/firecracker-all/
 

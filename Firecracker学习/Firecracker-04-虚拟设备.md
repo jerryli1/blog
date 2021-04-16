@@ -11,6 +11,8 @@ Firecracker模拟的设备
     - Virtio（block、net、ballon、vsock）
     - BootTimer（启动时间记录器）
 
+![image-20210416133810999](_images/firecracker-machine-model-x86.png)
+
 ## 设备模型
 
 - `trait BusDevice`：是所有设备的接口，所有设备都实现了BusDevice接口，然后注册到Bus上。
