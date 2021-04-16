@@ -35,7 +35,7 @@ struct virtio_net_hdr {
 
 ## 后端设备
 
-Firecracker后端使用[tun/tap](https://www.kernel.org/doc/Documentation/networking/tuntap.txt)作为虚拟网桥配合iptable转发规则实现Guest网络和外网的通信。
+Firecracker后端使用[tun/tap](https://www.kernel.org/doc/Documentation/networking/tuntap.txt)作为虚拟网桥配合iptables转发规则实现Guest网络和外网的通信。
 
 如何配置网络见文档：<https://github.com/firecracker-microvm/firecracker/blob/main/docs/network-setup.md>。
 
@@ -64,6 +64,9 @@ Host后端：
 		-> process_rx
         	-> read_from_mmds_or_tap
             	-> tap.read()        # 从tap收数据
+            -> rate_limited_rx_single_frame
+            -> write_frame_to_guest  # 数据加到receiveq1
+            	-> do_write_frame_to_guest
             -> signal_rx_used_queue  # 通知队列
 ```
 
